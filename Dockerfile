@@ -3,9 +3,13 @@ FROM node:20-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci --production=false
-COPY app/ ./app/
+
+# Only copy the active files — skip old dead directories
+COPY app/globals.css app/layout.js app/page.js app/favicon.ico ./app/
+COPY app/ui/ ./app/ui/
 COPY public/ ./public/
 COPY next.config.mjs postcss.config.mjs jsconfig.json ./
+
 RUN npm run build
 
 # ── Python runtime ──
@@ -13,11 +17,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install Python dependencies (CPU-only torch)
 COPY py-api/requirements-prod.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API code + model
 COPY py-api/main.py ./main.py
 COPY py-api/model/ ./model/
 
