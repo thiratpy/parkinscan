@@ -1,0 +1,30 @@
+# ── Render Blueprint ──────────────────────────────────────
+# Deploy both services from this single repo at render.com
+# Guide: push to GitHub → connect repo on Render → auto-deploy
+
+services:
+  # ── Python API (FastAPI + EfficientNet) ──
+  - type: web
+    name: parkinscan-api
+    runtime: python
+    plan: free
+    rootDir: py-api
+    buildCommand: pip install --no-cache-dir -r requirements-prod.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+  # ── Next.js Frontend ──
+  - type: web
+    name: parkinscan-web
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_API_URL
+        # After first deploy, update this to your actual API URL from Render dashboard
+        value: https://parkinscan-api.onrender.com
