@@ -1,5 +1,5 @@
 "use client";
-import { LayoutDashboard, Users, ScanLine, History, Brain, Activity, Menu, X } from "lucide-react";
+import { LayoutDashboard, Users, ScanLine, History, Brain, Menu, X } from "lucide-react";
 
 const items = [
   { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -59,10 +59,10 @@ export default function Sidebar({ tab, setTab, open, onToggle }) {
         {/* Status */}
         <div style={{ padding: "12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 6, background: "rgba(255,255,255,0.04)" }}>
-            <Activity size={16} color="#2dd4bf" />
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2dd4bf" }} />
             <div>
-              <div style={{ fontSize: 11, color: "#cbd5e1" }}>AI Model</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#2dd4bf" }}>EfficientNet Ready</div>
+              <div style={{ fontSize: 11, color: "#cbd5e1" }}>System Status</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#2dd4bf" }}>Demo v1.0</div>
             </div>
           </div>
         </div>
