@@ -77,11 +77,13 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
   const reset = () => { setFile(null); setPreview(null); setResult(null); setStatus("idle"); setErrorMsg(""); setDoctorOverride(null); setSaved(false); setHeatmapSrc(null); };
 
   const exportPdf = () => {
-    const el = printRef.current;
-    if (!el) return;
-    const printWin = window.open("", "_blank");
-    if (!printWin) return;
-    printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ParkinScan Report — ${selectedPatient?.name || "Patient"}</title>
+    if (!result || !selectedPatient) return;
+    const label = result.prediction || result.label;
+    const isH = label === "healthy";
+    const confPct = (result.confidence * 100).toFixed(1);
+    const now = new Date().toLocaleString();
+
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ParkinScan Report — ${selectedPatient.name}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -97,31 +99,39 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
   .parkinson { background: #ffe4e6; color: #e11d48; }
   img { max-width: 100%; border-radius: 6px; margin-top: 8px; }
   .disclaimer { font-size: 11px; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 10px 14px; margin-top: 16px; }
-  @media print { body { padding: 16px; } }
-</style></head><body>`);
-    const label = result.prediction || result.label;
-    const isH = label === "healthy";
-    const confPct = (result.confidence * 100).toFixed(1);
-    const now = new Date().toLocaleString();
-    printWin.document.write(`<h2>ParkinScan — AI Scan Report</h2>`);
-    printWin.document.write(`<div class="meta">${now}</div>`);
-    printWin.document.write(`<div class="section"><div class="section-title">Patient Information</div>`);
-    printWin.document.write(`<div class="row"><span class="label">Name</span><span>${selectedPatient.name}</span></div>`);
-    if (selectedPatient.hn) printWin.document.write(`<div class="row"><span class="label">HN</span><span>${selectedPatient.hn}</span></div>`);
-    printWin.document.write(`<div class="row"><span class="label">MRN</span><span>${selectedPatient.mrn}</span></div>`);
-    printWin.document.write(`<div class="row"><span class="label">Age / Sex</span><span>${selectedPatient.age} yrs / ${selectedPatient.sex}</span></div>`);
-    printWin.document.write(`</div>`);
-    printWin.document.write(`<div class="section"><div class="section-title">AI Classification Result</div>`);
-    printWin.document.write(`<div class="row"><span class="label">Classification</span><span class="badge ${isH ? 'healthy' : 'parkinson'}">${isH ? 'Healthy' : "Parkinson's"}</span></div>`);
-    printWin.document.write(`<div class="row"><span class="label">Confidence</span><span>${confPct}%</span></div>`);
-    if (doctorOverride) printWin.document.write(`<div class="row"><span class="label">Clinician Review</span><span>${doctorOverride === 'agree' ? 'Confirmed' : 'Disputed'}</span></div>`);
-    printWin.document.write(`</div>`);
-    if (preview) printWin.document.write(`<div class="section"><div class="section-title">Uploaded MRI</div><img src="${preview}" alt="MRI" /></div>`);
-    if (heatmapSrc) printWin.document.write(`<div class="section"><div class="section-title">Grad-CAM — AI Focus Region</div><img src="${heatmapSrc}" alt="Grad-CAM Heatmap" /></div>`);
-    printWin.document.write(`<div class="disclaimer">ข้อจำกัดความรับผิดชอบ: ผลการวิเคราะห์นี้เป็นเครื่องมือช่วยตัดสินใจเท่านั้น ไม่ใช่การวินิจฉัยทางการแพทย์ กรุณาปรึกษาแพทย์ผู้เชี่ยวชาญก่อนดำเนินการใดๆ</div>`);
-    printWin.document.write(`</body></html>`);
-    printWin.document.close();
-    setTimeout(() => { printWin.print(); }, 400);
+  .print-btn { display: block; margin: 24px auto 0; padding: 10px 28px; font-size: 14px; font-weight: 600; background: #0f3460; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-family: 'Sarabun', sans-serif; }
+  .print-btn:hover { background: #16213e; }
+  @media print { .print-btn { display: none; } body { padding: 16px; } }
+</style></head><body>`;
+    html += `<h2>ParkinScan — AI Scan Report</h2>`;
+    html += `<div class="meta">${now}</div>`;
+    html += `<div class="section"><div class="section-title">Patient Information</div>`;
+    html += `<div class="row"><span class="label">Name</span><span>${selectedPatient.name}</span></div>`;
+    if (selectedPatient.hn) html += `<div class="row"><span class="label">HN</span><span>${selectedPatient.hn}</span></div>`;
+    html += `<div class="row"><span class="label">MRN</span><span>${selectedPatient.mrn}</span></div>`;
+    html += `<div class="row"><span class="label">Age / Sex</span><span>${selectedPatient.age} yrs / ${selectedPatient.sex}</span></div>`;
+    html += `</div>`;
+    html += `<div class="section"><div class="section-title">AI Classification Result</div>`;
+    html += `<div class="row"><span class="label">Classification</span><span class="badge ${isH ? 'healthy' : 'parkinson'}">${isH ? 'Healthy' : "Parkinson's"}</span></div>`;
+    html += `<div class="row"><span class="label">Confidence</span><span>${confPct}%</span></div>`;
+    if (doctorOverride) html += `<div class="row"><span class="label">Clinician Review</span><span>${doctorOverride === 'agree' ? 'Confirmed' : 'Disputed'}</span></div>`;
+    html += `</div>`;
+    if (preview) html += `<div class="section"><div class="section-title">Uploaded MRI</div><img src="${preview}" alt="MRI" /></div>`;
+    if (heatmapSrc) html += `<div class="section"><div class="section-title">Grad-CAM — AI Focus Region</div><img src="${heatmapSrc}" alt="Grad-CAM Heatmap" /></div>`;
+    html += `<div class="disclaimer">ข้อจำกัดความรับผิดชอบ: ผลการวิเคราะห์นี้เป็นเครื่องมือช่วยตัดสินใจเท่านั้น ไม่ใช่การวินิจฉัยทางการแพทย์ กรุณาปรึกษาแพทย์ผู้เชี่ยวชาญก่อนดำเนินการใดๆ</div>`;
+    html += `<button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>`;
+    html += `</body></html>`;
+
+    // Use Blob download — works inside iframes (HF Spaces)
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ParkinScan_Report_${selectedPatient.name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const isHealthy = result && (result.prediction === "healthy" || result.label === "healthy");
