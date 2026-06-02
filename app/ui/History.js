@@ -1,15 +1,45 @@
 "use client";
-import { CheckCircle2, AlertCircle, Clock, History as HistoryIcon, AlertTriangle } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, AlertCircle, Clock, History as HistoryIcon, AlertTriangle, Search, Filter } from "lucide-react";
 
 export default function History({ scans, goToPatientDetail, patients }) {
+  const [filterPatientId, setFilterPatientId] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const filtered = scans.filter(scan => {
+    if (filterPatientId !== "all" && scan.patientId !== filterPatientId) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const matchName = scan.patientName && scan.patientName.toLowerCase().includes(q);
+      const matchPatient = scan.patientId && patients.find(p => p.id === scan.patientId && (p.name.toLowerCase().includes(q) || p.mrn.toLowerCase().includes(q) || (p.hn && p.hn.toLowerCase().includes(q))));
+      if (!matchName && !matchPatient) return false;
+    }
+    return true;
+  });
+
   return (
     <div>
       <div className="animate-fadeUp" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700 }}>Assessment History</h1>
-        <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 4 }}>{scans.length} assessment{scans.length !== 1 ? "s" : ""} recorded</p>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 4 }}>{filtered.length} of {scans.length} assessment{scans.length !== 1 ? "s" : ""} shown</p>
       </div>
 
-      {scans.length === 0 ? (
+      {/* Filters */}
+      <div className="animate-fadeUp stagger-1" style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 320 }}>
+          <Search size={16} color="var(--text-muted)" style={{ position: "absolute", left: 12, top: 12 }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by patient name, MRN, or HN..." style={{ width: "100%", height: 40, padding: "0 12px 0 36px", fontSize: 13, borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", background: "#fff", outline: "none" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Filter size={14} color="var(--text-muted)" />
+          <select value={filterPatientId} onChange={e => setFilterPatientId(e.target.value)} style={{ height: 40, padding: "0 12px", fontSize: 13, borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", background: "#fff", cursor: "pointer", minWidth: 180 }}>
+            <option value="all">All Patients</option>
+            {patients.map(p => <option key={p.id} value={p.id}>{p.name}{p.hn ? ` (${p.hn})` : ""}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="animate-fadeUp stagger-1" style={{ textAlign: "center", padding: 60 }}>
           <HistoryIcon size={36} color="var(--text-muted)" style={{ opacity: 0.3, marginBottom: 12 }} />
           <p style={{ fontSize: 15, fontWeight: 600 }}>No assessment history</p>
@@ -17,7 +47,7 @@ export default function History({ scans, goToPatientDetail, patients }) {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {scans.map((scan, i) => {
+          {filtered.map((scan, i) => {
             const isHealthy = scan.prediction === "healthy" || scan.label === "healthy";
             const date = new Date(scan.createdAt);
             const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " at " + date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });

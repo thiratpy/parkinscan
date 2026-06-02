@@ -14,13 +14,22 @@ const diagColors = { under_evaluation: { bg: "var(--warning-light)", color: "var
 
 // ── Patient Form (Add/Edit) ──
 function PatientForm({ onSubmit, onClose, initial }) {
-  const [f, setF] = useState(initial || { name: "", age: "", sex: "male", dateOfBirth: "", diagnosisStatus: "under_evaluation", medications: "", treatingPhysician: "", phone: "", email: "", notes: "" });
+  const [f, setF] = useState(initial || { name: "", hn: "", age: "", sex: "male", dateOfBirth: "", diagnosisStatus: "under_evaluation", medications: "", treatingPhysician: "", phone: "", email: "", notes: "" });
   const [err, setErr] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const submit = (e) => {
     e.preventDefault();
     if (!f.name.trim()) { setErr("Name is required"); return; }
-    if (!f.age || f.age < 0) { setErr("Valid age is required"); return; }
+    const ageNum = Number(f.age);
+    if (!f.age || isNaN(ageNum) || ageNum < 0 || ageNum > 120 || !Number.isInteger(ageNum)) {
+      setErr("Age must be a whole number between 0 and 120"); return;
+    }
+    if (f.phone && !/^[\d+\-\s]{9,15}$/.test(f.phone)) {
+      setErr("Phone must be 9–15 digits (may include +, -, spaces)"); return;
+    }
+    if (f.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) {
+      setErr("Please enter a valid email address"); return;
+    }
     onSubmit(f);
   };
   const isEdit = !!initial;
@@ -37,8 +46,9 @@ function PatientForm({ onSubmit, onClose, initial }) {
         </div>
         <form onSubmit={submit} style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
           <Field label="Full Name *" value={f.name} onChange={v => { set("name", v); setErr(""); }} placeholder="Patient full name" />
+          <Field label="HN (Hospital Number)" value={f.hn || ""} onChange={v => { set("hn", v); setErr(""); }} placeholder="e.g., HN-12345 (optional, for hospital reference)" />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Age *" value={f.age} onChange={v => { set("age", v); setErr(""); }} type="number" placeholder="Years" />
+            <Field label="Age *" value={f.age} onChange={v => { set("age", v); setErr(""); }} type="number" placeholder="0–120" min="0" max="120" />
             <div><label style={labelStyle}>Sex</label><select value={f.sex} onChange={e => set("sex", e.target.value)} style={inputStyle}><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -62,10 +72,10 @@ function PatientForm({ onSubmit, onClose, initial }) {
   );
 }
 
-function Field({ label, value, onChange, type = "text", placeholder }) {
+function Field({ label, value, onChange, type = "text", placeholder, min, max }) {
   return (
     <div><label style={labelStyle}>{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={inputStyle} />
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={inputStyle} min={min} max={max} />
     </div>
   );
 }
@@ -103,7 +113,7 @@ function PatientDetail({ patient, scans, goToScan, editPatient, deletePatient, s
               <h1 style={{ fontSize: 20, fontWeight: 700 }}>{patient.name}</h1>
               <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 10px", borderRadius: 99, background: d.bg, color: d.color }}>{diagLabels[patient.diagnosisStatus] || "Unknown"}</span>
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>MRN: {patient.mrn} &middot; {patient.age} years &middot; {patient.sex}</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{patient.hn ? `HN: ${patient.hn} · ` : ""}MRN: {patient.mrn} · {patient.age} years · {patient.sex}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setShowEdit(true)} style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: 6 }}><Edit3 size={14} />Edit</button>
@@ -219,7 +229,7 @@ export default function Patients({ patients, addPatient, editPatient, deletePati
     return <PatientDetail patient={selectedPatient} scans={scans} goToScan={goToScan} editPatient={editPatient} deletePatient={deletePatient} setTab={setTab} />;
   }
 
-  const filtered = patients.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.mrn.toLowerCase().includes(search.toLowerCase()));
+  const filtered = patients.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.mrn.toLowerCase().includes(search.toLowerCase()) || (p.hn && p.hn.toLowerCase().includes(search.toLowerCase())));
 
   return (
     <div>
@@ -231,7 +241,7 @@ export default function Patients({ patients, addPatient, editPatient, deletePati
       <div className="animate-fadeUp stagger-1" style={{ marginBottom: 20 }}>
         <div style={{ position: "relative", maxWidth: 400 }}>
           <Search size={16} color="var(--text-muted)" style={{ position: "absolute", left: 12, top: 12 }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or MRN..." style={{ ...inputStyle, paddingLeft: 36 }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, MRN, or HN..." style={{ ...inputStyle, paddingLeft: 36 }} />
         </div>
       </div>
 
@@ -267,7 +277,7 @@ export default function Patients({ patients, addPatient, editPatient, deletePati
                       <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                       <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 99, background: d.bg, color: d.color, flexShrink: 0 }}>{diagLabels[p.diagnosisStatus] || "Unknown"}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>MRN: {p.mrn} &middot; {p.age} yrs &middot; {p.sex}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{p.hn ? `HN: ${p.hn} · ` : ""}MRN: {p.mrn} · {p.age} yrs · {p.sex}</div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--text-muted)" }}>
                         <Calendar size={12} />{new Date(p.createdAt).toLocaleDateString()}

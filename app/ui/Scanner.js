@@ -1,6 +1,6 @@
 "use client";
-import { useState, useCallback } from "react";
-import { Upload, X, ScanLine, CheckCircle2, AlertCircle, Brain, TrendingUp, Save, ImageIcon, Loader2, AlertTriangle, ThumbsUp, ThumbsDown, Users, ArrowLeft } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
+import { Upload, X, ScanLine, CheckCircle2, AlertCircle, Brain, TrendingUp, Save, ImageIcon, Loader2, AlertTriangle, ThumbsUp, ThumbsDown, Users, ArrowLeft, FileDown, Eye } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const CONFIDENCE_THRESHOLD = 0.70;
@@ -14,6 +14,8 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
   const [dragActive, setDragActive] = useState(false);
   const [doctorOverride, setDoctorOverride] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [heatmapSrc, setHeatmapSrc] = useState(null);
+  const printRef = useRef(null);
 
   const handleFile = useCallback((f) => {
     if (!f) return;
@@ -33,16 +35,24 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
     if (!file || !selectedPatient) return;
     setStatus("analyzing");
     setErrorMsg("");
+    setHeatmapSrc(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${API_URL}/predict`, { method: "POST", body: fd });
+      // Try gradcam endpoint first, fallback to /predict
+      let res = await fetch(`${API_URL}/predict-gradcam`, { method: "POST", body: fd });
+      if (!res.ok && res.status === 404) {
+        const fd2 = new FormData();
+        fd2.append("file", file);
+        res = await fetch(`${API_URL}/predict`, { method: "POST", body: fd2 });
+      }
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         throw new Error(`Server returned ${res.status}${errText ? ": " + errText : ""}`);
       }
       const data = await res.json();
       setResult(data);
+      if (data.heatmap) setHeatmapSrc(data.heatmap);
       setStatus("success");
     } catch (err) {
       setStatus("error");
@@ -64,7 +74,55 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
     setSaved(true);
   };
 
-  const reset = () => { setFile(null); setPreview(null); setResult(null); setStatus("idle"); setErrorMsg(""); setDoctorOverride(null); setSaved(false); };
+  const reset = () => { setFile(null); setPreview(null); setResult(null); setStatus("idle"); setErrorMsg(""); setDoctorOverride(null); setSaved(false); setHeatmapSrc(null); };
+
+  const exportPdf = () => {
+    const el = printRef.current;
+    if (!el) return;
+    const printWin = window.open("", "_blank");
+    if (!printWin) return;
+    printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ParkinScan Report — ${selectedPatient?.name || "Patient"}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1a1a2e; padding: 32px; max-width: 700px; margin: 0 auto; }
+  h2 { font-size: 18px; margin-bottom: 4px; }
+  .meta { font-size: 12px; color: #666; margin-bottom: 20px; }
+  .section { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .section-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: #0f3460; }
+  .row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; }
+  .row .label { color: #888; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .healthy { background: #d1fae5; color: #059669; }
+  .parkinson { background: #ffe4e6; color: #e11d48; }
+  img { max-width: 100%; border-radius: 6px; margin-top: 8px; }
+  .disclaimer { font-size: 11px; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 10px 14px; margin-top: 16px; }
+  @media print { body { padding: 16px; } }
+</style></head><body>`);
+    const label = result.prediction || result.label;
+    const isH = label === "healthy";
+    const confPct = (result.confidence * 100).toFixed(1);
+    const now = new Date().toLocaleString();
+    printWin.document.write(`<h2>ParkinScan — AI Scan Report</h2>`);
+    printWin.document.write(`<div class="meta">${now}</div>`);
+    printWin.document.write(`<div class="section"><div class="section-title">Patient Information</div>`);
+    printWin.document.write(`<div class="row"><span class="label">Name</span><span>${selectedPatient.name}</span></div>`);
+    if (selectedPatient.hn) printWin.document.write(`<div class="row"><span class="label">HN</span><span>${selectedPatient.hn}</span></div>`);
+    printWin.document.write(`<div class="row"><span class="label">MRN</span><span>${selectedPatient.mrn}</span></div>`);
+    printWin.document.write(`<div class="row"><span class="label">Age / Sex</span><span>${selectedPatient.age} yrs / ${selectedPatient.sex}</span></div>`);
+    printWin.document.write(`</div>`);
+    printWin.document.write(`<div class="section"><div class="section-title">AI Classification Result</div>`);
+    printWin.document.write(`<div class="row"><span class="label">Classification</span><span class="badge ${isH ? 'healthy' : 'parkinson'}">${isH ? 'Healthy' : "Parkinson's"}</span></div>`);
+    printWin.document.write(`<div class="row"><span class="label">Confidence</span><span>${confPct}%</span></div>`);
+    if (doctorOverride) printWin.document.write(`<div class="row"><span class="label">Clinician Review</span><span>${doctorOverride === 'agree' ? 'Confirmed' : 'Disputed'}</span></div>`);
+    printWin.document.write(`</div>`);
+    if (preview) printWin.document.write(`<div class="section"><div class="section-title">Uploaded MRI</div><img src="${preview}" alt="MRI" /></div>`);
+    if (heatmapSrc) printWin.document.write(`<div class="section"><div class="section-title">Grad-CAM — AI Focus Region</div><img src="${heatmapSrc}" alt="Grad-CAM Heatmap" /></div>`);
+    printWin.document.write(`<div class="disclaimer">ข้อจำกัดความรับผิดชอบ: ผลการวิเคราะห์นี้เป็นเครื่องมือช่วยตัดสินใจเท่านั้น ไม่ใช่การวินิจฉัยทางการแพทย์ กรุณาปรึกษาแพทย์ผู้เชี่ยวชาญก่อนดำเนินการใดๆ</div>`);
+    printWin.document.write(`</body></html>`);
+    printWin.document.close();
+    setTimeout(() => { printWin.print(); }, 400);
+  };
 
   const isHealthy = result && (result.prediction === "healthy" || result.label === "healthy");
   const conf = result ? (result.confidence * 100).toFixed(1) : 0;
@@ -138,7 +196,7 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{selectedPatient.name}</div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>MRN: {selectedPatient.mrn} &middot; {selectedPatient.age} yrs &middot; {selectedPatient.sex}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{selectedPatient.hn ? `HN: ${selectedPatient.hn} · ` : ""}MRN: {selectedPatient.mrn} · {selectedPatient.age} yrs · {selectedPatient.sex}</div>
         </div>
         <button onClick={() => { setTab("patientDetail"); }} style={{ fontSize: 11, fontWeight: 500, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View Profile</button>
       </div>
@@ -154,6 +212,22 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
           <button onClick={() => setErrorMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--danger)", padding: 2 }}><X size={14} /></button>
         </div>
       )}
+
+      {/* Medical Disclaimer — always visible */}
+      <div className="animate-fadeUp stagger-2" style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "12px 16px", marginBottom: 16,
+        borderRadius: "var(--radius)",
+        background: "var(--warning-light)",
+        border: "1px solid rgba(217,119,6,0.2)",
+      }}>
+        <AlertTriangle size={16} color="var(--warning)" style={{ marginTop: 1, flexShrink: 0 }} />
+        <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+          <strong style={{ color: "var(--warning)" }}>ข้อจำกัดความรับผิดชอบ (Disclaimer):</strong>{" "}
+          ผลการวิเคราะห์นี้เป็นเครื่องมือช่วยตัดสินใจเท่านั้น <strong style={{ color: "var(--warning)" }}>ไม่ใช่การวินิจฉัยทางการแพทย์</strong>
+          {" "}กรุณาปรึกษาแพทย์ผู้เชี่ยวชาญก่อนดำเนินการใดๆ
+        </div>
+      </div>
 
       {/* Upload area */}
       <div className="animate-fadeUp stagger-2" style={{ background: "var(--card)", borderRadius: "var(--radius)", border: "1px solid var(--border)", boxShadow: "var(--shadow)", padding: 24, marginBottom: 20 }}>
@@ -273,10 +347,26 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
         </div>
       )}
 
+      {/* Grad-CAM Heatmap */}
+      {heatmapSrc && (
+        <div className="animate-fadeUp" style={{ background: "var(--card)", borderRadius: "var(--radius)", border: "1px solid var(--border)", boxShadow: "var(--shadow)", padding: 20, marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+            <Eye size={16} color="var(--primary)" />AI Focus Region (Grad-CAM)
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>Heatmap shows which brain regions the model focused on during classification. Red = high attention, blue = low attention.</p>
+          <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+            <img src={heatmapSrc} alt="Grad-CAM Heatmap" style={{ width: "100%", display: "block" }} />
+          </div>
+        </div>
+      )}
+
       {result && !saved && (
         <div className="animate-fadeUp" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <button onClick={reset} style={{ padding: "8px 20px", fontSize: 13, fontWeight: 500, background: "transparent", color: "var(--text-secondary)", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>Scan Another</button>
-          <button onClick={save} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 20px", fontSize: 13, fontWeight: 500, background: "var(--primary)", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}><Save size={16} />Save to History</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={exportPdf} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 20px", fontSize: 13, fontWeight: 500, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}><FileDown size={16} />Export PDF</button>
+            <button onClick={save} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 20px", fontSize: 13, fontWeight: 500, background: "var(--primary)", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}><Save size={16} />Save to History</button>
+          </div>
         </div>
       )}
 
@@ -287,6 +377,7 @@ export default function Scanner({ patients, selectedPatient, setSelectedPatient,
             <span style={{ fontSize: 13, fontWeight: 500, color: "var(--success)" }}>Saved to {selectedPatient.name}'s record</span>
           </div>
           <div style={{ display: "flex", gap: 12 }}>
+            <button onClick={exportPdf} style={{ fontSize: 12, fontWeight: 500, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}><FileDown size={12} />Export PDF</button>
             <button onClick={reset} style={{ fontSize: 12, fontWeight: 500, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Scan Another</button>
             <button onClick={() => setTab("patientDetail")} style={{ fontSize: 12, fontWeight: 500, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View Patient</button>
           </div>

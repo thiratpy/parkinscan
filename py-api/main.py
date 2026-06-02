@@ -178,6 +178,151 @@ async def predict(file: UploadFile = File(...)):
     }
 
 
+def generate_gradcam(input_tensor, target_class):
+    """Generate Grad-CAM heatmap for the given input and target class."""
+    # Get the last conv layer from EfficientNet-B0 (timm): model.conv_head
+    # Fallback to features[-1] if conv_head doesn't exist
+    target_layer = None
+    if hasattr(model, "conv_head"):
+        target_layer = model.conv_head
+    elif hasattr(model, "features"):
+        target_layer = model.features[-1]
+    else:
+        return None
+
+    activations = []
+    gradients = []
+
+    def forward_hook(module, inp, out):
+        activations.append(out.detach())
+
+    def backward_hook(module, grad_in, grad_out):
+        gradients.append(grad_out[0].detach())
+
+    fh = target_layer.register_forward_hook(forward_hook)
+    bh = target_layer.register_full_backward_hook(backward_hook)
+
+    try:
+        output = model(input_tensor)
+        model.zero_grad()
+        target_score = output[0, target_class]
+        target_score.backward()
+
+        if not activations or not gradients:
+            return None
+
+        act = activations[0]  # (1, C, H, W)
+        grad = gradients[0]   # (1, C, H, W)
+
+        # Global average pool of gradients → channel weights
+        weights = grad.mean(dim=(2, 3), keepdim=True)  # (1, C, 1, 1)
+        cam = (weights * act).sum(dim=1, keepdim=True)  # (1, 1, H, W)
+        cam = torch.relu(cam)
+        cam = cam.squeeze().cpu().numpy()
+
+        # Normalize to [0, 255]
+        if cam.max() > 0:
+            cam = cam / cam.max()
+        cam = (cam * 255).astype(np.uint8)
+
+        # Resize to 224x224
+        cam = cv2.resize(cam, (224, 224))
+
+        return cam
+    except Exception as e:
+        logger.warning(f"Grad-CAM computation failed: {e}")
+        return None
+    finally:
+        fh.remove()
+        bh.remove()
+
+
+@app.post("/predict-gradcam")
+async def predict_gradcam(file: UploadFile = File(...)):
+    """Prediction with Grad-CAM heatmap overlay."""
+    start = time.time()
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Upload an image file (PNG, JPEG, WebP)")
+
+    try:
+        contents = await file.read()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not read the uploaded file")
+
+    if model is None:
+        return {
+            "prediction": "healthy",
+            "label": "healthy",
+            "confidence": 0.85,
+            "mock": True,
+            "message": "Model not loaded — returning mock result",
+        }
+
+    # Preprocess
+    image = crop_and_enhance_mri(contents)
+    if image is None:
+        try:
+            image = Image.open(io.BytesIO(contents)).convert("RGB")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not decode the uploaded image")
+
+    input_tensor = transform(image).unsqueeze(0).to(DEVICE)
+    input_tensor.requires_grad_(True)
+
+    # Forward pass (with gradients for Grad-CAM)
+    output = model(input_tensor)
+    probabilities = torch.softmax(output, dim=1)
+    parkinson_prob = probabilities[0, 1].item()
+
+    if parkinson_prob >= OPTIMAL_THRESHOLD:
+        label = "parkinson"
+        conf = round(parkinson_prob, 4)
+        target_class = 1
+    else:
+        label = "healthy"
+        conf = round(1.0 - parkinson_prob, 4)
+        target_class = 0
+
+    # Generate Grad-CAM
+    heatmap_b64 = None
+    cam = generate_gradcam(input_tensor.detach().clone().requires_grad_(True), target_class)
+    if cam is not None:
+        try:
+            # Apply colormap
+            heatmap_colored = cv2.applyColorMap(cam, cv2.COLORMAP_JET)
+
+            # Get original image as numpy array (224x224)
+            img_np = np.array(image.resize((224, 224)))
+            if len(img_np.shape) == 2:
+                img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            elif img_np.shape[2] == 3:
+                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            # Blend: 60% original + 40% heatmap
+            overlay = cv2.addWeighted(img_np, 0.6, heatmap_colored, 0.4, 0)
+
+            # Encode to base64 PNG
+            import base64
+            _, buffer = cv2.imencode('.png', overlay)
+            heatmap_b64 = "data:image/png;base64," + base64.b64encode(buffer).decode('utf-8')
+        except Exception as e:
+            logger.warning(f"Heatmap overlay failed: {e}")
+
+    latency_ms = (time.time() - start) * 1000
+    logger.info(f"Grad-CAM Prediction: {label} | Confidence: {conf} | P(parkinson): {parkinson_prob:.4f} | Latency: {latency_ms:.0f}ms | File: {file.filename}")
+
+    result = {
+        "prediction": label,
+        "label": label,
+        "confidence": conf,
+    }
+    if heatmap_b64:
+        result["heatmap"] = heatmap_b64
+
+    return result
+
+
 # ── Serve Frontend (production only) ─────────────────────
 # When deployed, the Next.js static export lives in /app/static
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
