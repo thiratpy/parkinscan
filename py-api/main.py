@@ -383,12 +383,166 @@ async def ping_db():
     if not supabase_client:
         return {"status": "skipped", "message": "Supabase not configured"}
     try:
-        # Just a lightweight query to keep DB alive
         supabase_client.table("usage_logs").select("timestamp").limit(1).execute()
         return {"status": "ok", "message": "Database pinged successfully"}
     except Exception as e:
         logger.error(f"Database ping failed: {e}")
         return {"status": "error", "message": str(e)}
+
+
+# ── Patient CRUD API ─────────────────────────────────────
+
+@app.get("/api/patients")
+async def list_patients(search: str = "", status: str = "all", sort_by: str = "created_at", sort_dir: str = "desc", page_size: int = 100, offset: int = 0):
+    if not supabase_client:
+        return {"patients": [], "count": 0}
+    try:
+        query = supabase_client.table("patients").select("*", count="exact")
+        if status != "all":
+            query = query.eq("status", status)
+        if search:
+            query = query.or_(f"name.ilike.%{search}%,mrn.ilike.%{search}%,hn.ilike.%{search}%")
+        query = query.order(sort_by, desc=(sort_dir == "desc")).range(offset, offset + page_size - 1)
+        result = query.execute()
+        return {"patients": result.data or [], "count": result.count or 0}
+    except Exception as e:
+        logger.error(f"list_patients error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/patients")
+async def create_patient(body: dict = None):
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    if not body:
+        raise HTTPException(status_code=400, detail="Request body required")
+    try:
+        import random, string
+        ts = hex(int(time.time()))[2:].upper()
+        rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        mrn = f"PKS-{ts}-{rnd}"
+        row = {
+            "name": body.get("name"),
+            "hn": body.get("hn"),
+            "age": int(body["age"]) if body.get("age") else None,
+            "sex": body.get("sex"),
+            "date_of_birth": body.get("dateOfBirth"),
+            "diagnosis_status": body.get("diagnosisStatus", "under_evaluation"),
+            "medications": body.get("medications"),
+            "treating_physician": body.get("treatingPhysician"),
+            "phone": body.get("phone"),
+            "email": body.get("email"),
+            "notes": body.get("notes"),
+            "mrn": mrn,
+            "status": "active",
+        }
+        result = supabase_client.table("patients").insert(row).execute()
+        return result.data[0] if result.data else {}
+    except Exception as e:
+        logger.error(f"create_patient error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/patients/{patient_id}")
+async def update_patient(patient_id: str, body: dict = None):
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    try:
+        update = {}
+        field_map = {
+            "name": "name", "hn": "hn", "sex": "sex", "phone": "phone",
+            "email": "email", "notes": "notes", "status": "status",
+            "medications": "medications",
+            "dateOfBirth": "date_of_birth",
+            "diagnosisStatus": "diagnosis_status",
+            "treatingPhysician": "treating_physician",
+        }
+        for js_key, db_key in field_map.items():
+            if js_key in body:
+                update[db_key] = body[js_key]
+        if "age" in body:
+            update["age"] = int(body["age"]) if body["age"] else None
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+        supabase_client.table("patients").update(update).eq("id", patient_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"update_patient error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/patients/{patient_id}")
+async def delete_patient(patient_id: str):
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    try:
+        supabase_client.table("patients").delete().eq("id", patient_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"delete_patient error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Scan CRUD API ─────────────────────────────────────────
+
+@app.get("/api/scans")
+async def list_scans(patient_id: str = None, page_size: int = 100):
+    if not supabase_client:
+        return []
+    try:
+        query = supabase_client.table("scans").select("*").order("created_at", desc=True).limit(page_size)
+        if patient_id:
+            query = query.eq("patient_id", patient_id)
+        result = query.execute()
+        return result.data or []
+    except Exception as e:
+        logger.error(f"list_scans error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/scans")
+async def create_scan(body: dict = None):
+    if not supabase_client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    if not body:
+        raise HTTPException(status_code=400, detail="Request body required")
+    try:
+        row = {
+            "patient_id": body.get("patientId"),
+            "type": body.get("type", "mri"),
+            "prediction": body.get("prediction"),
+            "confidence": float(body["confidence"]) if body.get("confidence") else None,
+            "doctor_override": body.get("doctorOverride"),
+            "label": body.get("label"),
+            "is_mock": body.get("mock", False),
+            "notes": body.get("notes"),
+            "image_url": body.get("imageUrl"),
+        }
+        result = supabase_client.table("scans").insert(row).execute()
+        return result.data[0] if result.data else {}
+    except Exception as e:
+        logger.error(f"create_scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Dashboard Stats API ──────────────────────────────────
+
+@app.get("/api/stats")
+async def dashboard_stats():
+    if not supabase_client:
+        return {"totalPatients": 0, "totalScans": 0, "scansThisWeek": 0, "avgConfidence": 0}
+    try:
+        p = supabase_client.table("patients").select("*", count="exact").execute()
+        s = supabase_client.table("scans").select("*", count="exact").execute()
+        week_ago = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=7)).isoformat()
+        sw = supabase_client.table("scans").select("*", count="exact").gte("created_at", week_ago).execute()
+        confs = supabase_client.table("scans").select("confidence").execute()
+        avg = 0
+        valid = [float(c["confidence"]) for c in (confs.data or []) if c.get("confidence") is not None]
+        if valid:
+            avg = round(sum(valid) / len(valid), 1)
+        return {
+            "totalPatients": p.count or 0,
+            "totalScans": s.count or 0,
+            "scansThisWeek": sw.count or 0,
+            "avgConfidence": avg,
+        }
+    except Exception as e:
+        logger.error(f"dashboard_stats error: {e}")
+        return {"totalPatients": 0, "totalScans": 0, "scansThisWeek": 0, "avgConfidence": 0}
 
 
 # ── Serve Frontend (production only) ─────────────────────
