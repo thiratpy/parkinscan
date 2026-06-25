@@ -7,6 +7,7 @@ RUN npm ci --production=false
 # Only copy the active files — skip old dead directories
 COPY app/globals.css app/layout.js app/page.js app/favicon.ico ./app/
 COPY app/ui/ ./app/ui/
+COPY app/lib/ ./app/lib/
 COPY public/ ./public/
 COPY next.config.mjs postcss.config.mjs jsconfig.json ./
 
