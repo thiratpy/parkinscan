@@ -414,8 +414,15 @@ if os.path.isdir(STATIC_DIR):
         file_path = os.path.join(STATIC_DIR, path)
         if os.path.isfile(file_path):
             return FileResponse(file_path)
-        # Otherwise serve index.html (SPA)
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+        # Otherwise serve index.html (SPA) with NO CACHE headers
+        return FileResponse(
+            os.path.join(STATIC_DIR, "index.html"),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
 else:
     logger.info("No static directory found — running in API-only mode (local dev)")
 
