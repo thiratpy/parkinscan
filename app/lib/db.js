@@ -1,20 +1,4 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  limit,
-  startAfter,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "./firebase";
+import { supabase } from "./supabase";
 
 const PATIENTS_COLLECTION = "patients";
 const SCANS_COLLECTION = "scans";
@@ -27,128 +11,168 @@ function generateMRN() {
   return `PKS-${timestamp}-${random}`;
 }
 
+function mapRow(row) {
+  if (!row) return null;
+  const mapped = { ...row };
+  if (row.created_at) {
+    mapped.createdAt = { toDate: () => new Date(row.created_at) };
+  }
+  if (row.updated_at) {
+    mapped.updatedAt = { toDate: () => new Date(row.updated_at) };
+  }
+  return mapped;
+}
+
 export async function createPatient(data) {
   const patientData = {
     ...data,
     mrn: generateMRN(),
     status: "active",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
   };
-  const docRef = await addDoc(collection(db, PATIENTS_COLLECTION), patientData);
-  return { id: docRef.id, ...patientData };
+  
+  const { data: newPatient, error } = await supabase
+    .from(PATIENTS_COLLECTION)
+    .insert([patientData])
+    .select()
+    .single();
+    
+  if (error) throw error;
+  return mapRow(newPatient);
 }
 
 export async function updatePatient(id, data) {
-  const docRef = doc(db, PATIENTS_COLLECTION, id);
-  await updateDoc(docRef, {
-    ...data,
-    updatedAt: serverTimestamp(),
-  });
+  const { error } = await supabase
+    .from(PATIENTS_COLLECTION)
+    .update(data)
+    .eq('id', id);
+    
+  if (error) throw error;
 }
 
 export async function deletePatient(id) {
-  const docRef = doc(db, PATIENTS_COLLECTION, id);
-  await deleteDoc(docRef);
+  const { error } = await supabase
+    .from(PATIENTS_COLLECTION)
+    .delete()
+    .eq('id', id);
+    
+  if (error) throw error;
 }
 
 export async function getPatient(id) {
-  const docRef = doc(db, PATIENTS_COLLECTION, id);
-  const snapshot = await getDoc(docRef);
-  if (!snapshot.exists()) return null;
-  return { id: snapshot.id, ...snapshot.data() };
+  const { data, error } = await supabase
+    .from(PATIENTS_COLLECTION)
+    .select('*')
+    .eq('id', id)
+    .single();
+    
+  if (error) return null;
+  return mapRow(data);
 }
 
-export async function listPatients({ search = "", status = "all", sortBy = "createdAt", sortDir = "desc", pageSize = 20, lastDoc = null } = {}) {
-  let q = collection(db, PATIENTS_COLLECTION);
-  const constraints = [];
+export async function listPatients({ search = "", status = "all", sortBy = "created_at", sortDir = "desc", pageSize = 20, offset = 0 } = {}) {
+  let query = supabase
+    .from(PATIENTS_COLLECTION)
+    .select('*', { count: 'exact' });
 
   if (status !== "all") {
-    constraints.push(where("status", "==", status));
+    query = query.eq('status', status);
   }
 
-  constraints.push(orderBy(sortBy, sortDir));
-  constraints.push(limit(pageSize));
-
-  if (lastDoc) {
-    constraints.push(startAfter(lastDoc));
+  if (search) {
+    query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,mrn.ilike.%${search}%`);
   }
 
-  q = query(q, ...constraints);
-  const snapshot = await getDocs(q);
-  const patients = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const orderByField = sortBy === "createdAt" ? "created_at" : sortBy;
+  
+  const { data: patients, error, count } = await query
+    .order(orderByField, { ascending: sortDir === "asc" })
+    .range(offset, offset + pageSize - 1);
+
+  if (error) throw error;
 
   return {
-    patients,
-    lastDoc: snapshot.docs[snapshot.docs.length - 1] || null,
-    hasMore: snapshot.docs.length === pageSize,
+    patients: (patients || []).map(mapRow),
+    hasMore: count > offset + pageSize,
+    nextOffset: offset + pageSize,
   };
 }
 
 // ── Scan Results ──────────────────────────────────────────
 
 export async function addScanResult(patientId, scanData) {
-  const data = {
-    patientId,
-    ...scanData,
-    createdAt: serverTimestamp(),
-  };
-  const docRef = await addDoc(collection(db, SCANS_COLLECTION), data);
-  return { id: docRef.id, ...data };
+  const { data, error } = await supabase
+    .from(SCANS_COLLECTION)
+    .insert([{ patientId: patientId, ...scanData }])
+    .select()
+    .single();
+    
+  if (error) throw error;
+  return mapRow(data);
 }
 
 export async function listScanHistory(patientId = null, { pageSize = 50 } = {}) {
-  let q = collection(db, SCANS_COLLECTION);
-  const constraints = [];
-
+  let query = supabase
+    .from(SCANS_COLLECTION)
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(pageSize);
+    
   if (patientId) {
-    constraints.push(where("patientId", "==", patientId));
+    query = query.eq('patientId', patientId);
   }
-
-  constraints.push(orderBy("createdAt", "desc"));
-  constraints.push(limit(pageSize));
-
-  q = query(q, ...constraints);
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapRow);
 }
 
 export async function getScanResult(id) {
-  const docRef = doc(db, SCANS_COLLECTION, id);
-  const snapshot = await getDoc(docRef);
-  if (!snapshot.exists()) return null;
-  return { id: snapshot.id, ...snapshot.data() };
+  const { data, error } = await supabase
+    .from(SCANS_COLLECTION)
+    .select('*')
+    .eq('id', id)
+    .single();
+    
+  if (error) return null;
+  return mapRow(data);
 }
 
 // ── Stats ──────────────────────────────────────────────
 
 export async function getDashboardStats() {
-  const patientsSnapshot = await getDocs(collection(db, PATIENTS_COLLECTION));
-  const scansSnapshot = await getDocs(collection(db, SCANS_COLLECTION));
-
   const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const weekAgoTimestamp = Timestamp.fromDate(weekAgo);
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  let recentScans = 0;
-  let totalConfidence = 0;
-  let scanCount = 0;
+  const { count: totalPatients } = await supabase
+    .from(PATIENTS_COLLECTION)
+    .select('*', { count: 'exact', head: true });
 
-  scansSnapshot.docs.forEach((doc) => {
-    const data = doc.data();
-    if (data.createdAt && data.createdAt.toDate() > weekAgo) {
-      recentScans++;
+  const { count: totalScans } = await supabase
+    .from(SCANS_COLLECTION)
+    .select('*', { count: 'exact', head: true });
+
+  const { count: scansThisWeek } = await supabase
+    .from(SCANS_COLLECTION)
+    .select('*', { count: 'exact', head: true })
+    .gte('created_at', weekAgo);
+
+  const { data: allScans } = await supabase
+    .from(SCANS_COLLECTION)
+    .select('confidence');
+    
+  let avgConfidence = 0;
+  if (allScans && allScans.length > 0) {
+    const validScans = allScans.filter(s => s.confidence !== null && s.confidence !== undefined);
+    if (validScans.length > 0) {
+      const sum = validScans.reduce((acc, curr) => acc + parseFloat(curr.confidence), 0);
+      avgConfidence = (sum / validScans.length).toFixed(1);
     }
-    if (data.confidence) {
-      totalConfidence += data.confidence;
-      scanCount++;
-    }
-  });
+  }
 
   return {
-    totalPatients: patientsSnapshot.size,
-    scansThisWeek: recentScans,
-    totalScans: scansSnapshot.size,
-    avgConfidence: scanCount > 0 ? (totalConfidence / scanCount).toFixed(1) : 0,
+    totalPatients: totalPatients || 0,
+    scansThisWeek: scansThisWeek || 0,
+    totalScans: totalScans || 0,
+    avgConfidence,
   };
 }

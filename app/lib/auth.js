@@ -1,31 +1,37 @@
-import {
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-} from "firebase/auth";
-import { auth } from "./firebase";
-
-const googleProvider = new GoogleAuthProvider();
+import { supabase } from "./supabase";
 
 export async function signInWithEmail(email, password) {
-  return signInWithEmailAndPassword(auth, email, password);
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function signInWithGoogle() {
-  return signInWithPopup(auth, googleProvider);
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function signOut() {
-  return firebaseSignOut(auth);
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
 
 export async function resetPassword(email) {
-  return sendPasswordResetEmail(auth, email);
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  if (error) throw error;
 }
 
 export function onAuthChange(callback) {
-  return onAuthStateChanged(auth, callback);
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    callback(session?.user || null);
+  });
+  return () => {
+    subscription.unsubscribe();
+  };
 }
