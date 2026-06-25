@@ -161,6 +161,13 @@ async def health():
         "device": str(DEVICE),
     }
 
+@app.get("/api/config")
+async def get_config():
+    return {
+        "SUPABASE_URL": os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL") or "",
+        "SUPABASE_ANON_KEY": os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY") or ""
+    }
+
 @app.post("/predict")
 async def predict(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     start = time.time()

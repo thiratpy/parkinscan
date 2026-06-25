@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { getSupabase } from "./supabase";
 
 const PATIENTS_COLLECTION = "patients";
 const SCANS_COLLECTION = "scans";
@@ -24,6 +24,7 @@ function mapRow(row) {
 }
 
 export async function createPatient(data) {
+  const supabase = await getSupabase();
   const patientData = {
     ...data,
     mrn: generateMRN(),
@@ -41,6 +42,7 @@ export async function createPatient(data) {
 }
 
 export async function updatePatient(id, data) {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from(PATIENTS_COLLECTION)
     .update(data)
@@ -50,6 +52,7 @@ export async function updatePatient(id, data) {
 }
 
 export async function deletePatient(id) {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from(PATIENTS_COLLECTION)
     .delete()
@@ -59,6 +62,7 @@ export async function deletePatient(id) {
 }
 
 export async function getPatient(id) {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from(PATIENTS_COLLECTION)
     .select('*')
@@ -70,6 +74,7 @@ export async function getPatient(id) {
 }
 
 export async function listPatients({ search = "", status = "all", sortBy = "created_at", sortDir = "desc", pageSize = 20, offset = 0 } = {}) {
+  const supabase = await getSupabase();
   let query = supabase
     .from(PATIENTS_COLLECTION)
     .select('*', { count: 'exact' });
@@ -100,6 +105,7 @@ export async function listPatients({ search = "", status = "all", sortBy = "crea
 // ── Scan Results ──────────────────────────────────────────
 
 export async function addScanResult(patientId, scanData) {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from(SCANS_COLLECTION)
     .insert([{ patientId: patientId, ...scanData }])
@@ -111,6 +117,7 @@ export async function addScanResult(patientId, scanData) {
 }
 
 export async function listScanHistory(patientId = null, { pageSize = 50 } = {}) {
+  const supabase = await getSupabase();
   let query = supabase
     .from(SCANS_COLLECTION)
     .select('*')
@@ -127,6 +134,7 @@ export async function listScanHistory(patientId = null, { pageSize = 50 } = {}) 
 }
 
 export async function getScanResult(id) {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from(SCANS_COLLECTION)
     .select('*')
@@ -140,6 +148,7 @@ export async function getScanResult(id) {
 // ── Stats ──────────────────────────────────────────────
 
 export async function getDashboardStats() {
+  const supabase = await getSupabase();
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 

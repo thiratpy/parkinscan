@@ -17,10 +17,25 @@ export function AuthProvider({ children }) {
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthChange((user) => {
-      setState({ user, loading: false, error: null });
-    });
-    return () => unsubscribe();
+    let unsubscribe = null;
+    let isMounted = true;
+
+    async function initAuth() {
+      try {
+        unsubscribe = await onAuthChange((user) => {
+          if (isMounted) setState({ user, loading: false, error: null });
+        });
+      } catch (e) {
+        if (isMounted) setState({ user: null, loading: false, error: e });
+      }
+    }
+
+    initAuth();
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   return (
