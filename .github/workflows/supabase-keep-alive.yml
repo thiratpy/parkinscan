@@ -1,0 +1,36 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    # Run at 00:00 UTC every day
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual triggering from the GitHub UI
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase directly via REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "Warning: SUPABASE_URL or SUPABASE_KEY secrets are not set in GitHub repository settings."
+            echo "Please add them to enable the daily keep-alive ping."
+            exit 1
+          fi
+          
+          echo "Pinging Supabase database to keep free tier active..."
+          
+          # Perform a lightweight read query (fetch 1 row from usage_logs)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X GET "${SUPABASE_URL}/rest/v1/usage_logs?select=timestamp&limit=1" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}")
+            
+          if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "Successfully pinged Supabase (HTTP $HTTP_STATUS)"
+          else
+            echo "Failed to ping Supabase (HTTP $HTTP_STATUS). Check your credentials and table."
+            exit 1
+          fi

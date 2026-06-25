@@ -2,6 +2,9 @@ import io
 import os
 import time
 import logging
+import uuid
+from datetime import datetime, timezone
+from supabase import create_client, Client
 import numpy as np
 import cv2
 import torch
@@ -9,7 +12,7 @@ import torch.nn as nn
 from torchvision import transforms
 from PIL import Image
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -29,6 +32,47 @@ LABELS = ["healthy", "parkinson"]
 OPTIMAL_THRESHOLD = 0.70
 
 model = None
+
+# ── Supabase ─────────────────────────────────────────────
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase_client: Client | None = None
+
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client initialized successfully.")
+    except Exception as e:
+        logger.warning(f"Could not initialize Supabase client: {e}")
+
+def log_usage_to_supabase(endpoint: str, label: str, confidence: float, latency_ms: float, image_bytes: bytes, filename: str):
+    if not supabase_client:
+        return
+    
+    try:
+        file_ext = filename.split(".")[-1] if "." in filename else "png"
+        unique_filename = f"{uuid.uuid4()}.{file_ext}"
+        
+        supabase_client.storage.from_("mri-images").upload(
+            file=image_bytes,
+            path=unique_filename,
+            file_options={"content-type": f"image/{file_ext}"}
+        )
+        
+        image_url = supabase_client.storage.from_("mri-images").get_public_url(unique_filename)
+        
+        supabase_client.table("usage_logs").insert({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "endpoint": endpoint,
+            "predicted_label": label,
+            "confidence": confidence,
+            "latency_ms": latency_ms,
+            "image_url": image_url
+        }).execute()
+        logger.info(f"Successfully logged usage to Supabase: {unique_filename}")
+        
+    except Exception as e:
+        logger.error(f"Failed to log usage to Supabase: {e}")
 
 
 def crop_and_enhance_mri(img_bytes):
@@ -118,7 +162,7 @@ async def health():
     }
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     start = time.time()
 
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -170,6 +214,8 @@ async def predict(file: UploadFile = File(...)):
     latency_ms = (time.time() - start) * 1000
 
     logger.info(f"Prediction: {label} | Confidence: {conf} | P(parkinson): {parkinson_prob:.4f} | Threshold: {OPTIMAL_THRESHOLD} | Latency: {latency_ms:.0f}ms | File: {file.filename}")
+
+    background_tasks.add_task(log_usage_to_supabase, "/predict", label, conf, latency_ms, contents, file.filename)
 
     return {
         "prediction": label,
@@ -238,7 +284,7 @@ def generate_gradcam(input_tensor, target_class):
 
 
 @app.post("/predict-gradcam")
-async def predict_gradcam(file: UploadFile = File(...)):
+async def predict_gradcam(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Prediction with Grad-CAM heatmap overlay."""
     start = time.time()
 
@@ -312,6 +358,8 @@ async def predict_gradcam(file: UploadFile = File(...)):
     latency_ms = (time.time() - start) * 1000
     logger.info(f"Grad-CAM Prediction: {label} | Confidence: {conf} | P(parkinson): {parkinson_prob:.4f} | Latency: {latency_ms:.0f}ms | File: {file.filename}")
 
+    background_tasks.add_task(log_usage_to_supabase, "/predict-gradcam", label, conf, latency_ms, contents, file.filename)
+
     result = {
         "prediction": label,
         "label": label,
@@ -321,6 +369,19 @@ async def predict_gradcam(file: UploadFile = File(...)):
         result["heatmap"] = heatmap_b64
 
     return result
+
+
+@app.get("/ping-db")
+async def ping_db():
+    if not supabase_client:
+        return {"status": "skipped", "message": "Supabase not configured"}
+    try:
+        # Just a lightweight query to keep DB alive
+        supabase_client.table("usage_logs").select("timestamp").limit(1).execute()
+        return {"status": "ok", "message": "Database pinged successfully"}
+    except Exception as e:
+        logger.error(f"Database ping failed: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 # ── Serve Frontend (production only) ─────────────────────
