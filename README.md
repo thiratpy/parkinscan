@@ -23,3 +23,4 @@ AI-powered spiral and wave drawing analysis for Parkinson's disease screening us
 - **Frontend:** Next.js (static export)
 - **Backend:** FastAPI + PyTorch
 - **Model:** EfficientNet-B0 (2-class: healthy / parkinson)
+# parkinscan
