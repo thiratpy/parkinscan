@@ -151,6 +151,14 @@ app.add_middleware(
 
 
 # ── API Endpoints ────────────────────────────────────────
+@app.get("/")
+async def root():
+    return {
+        "message": "Parkinson AI Backend API is running",
+        "docs_url": "/docs",
+        "health_url": "/health"
+    }
+
 @app.get("/health")
 async def health():
     return {
