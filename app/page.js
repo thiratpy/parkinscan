@@ -6,11 +6,7 @@ import Patients from "./ui/Patients";
 import Scanner from "./ui/Scanner";
 import History from "./ui/History";
 
-function loadData(key, fallback) {
-  if (typeof window === "undefined") return fallback;
-  try { const d = localStorage.getItem(key); return d ? JSON.parse(d) : fallback; } catch { return fallback; }
-}
-function saveData(key, data) { localStorage.setItem(key, JSON.stringify(data)); }
+import { listPatients, createPatient as dbCreatePatient, updatePatient as dbUpdatePatient, deletePatient as dbDeletePatient, listScanHistory, addScanResult as dbAddScanResult } from "./lib/db";
 
 export default function App() {
   const [tab, setTab] = useState("dashboard");
@@ -20,8 +16,17 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    setPatients(loadData("pk_patients", []));
-    setScans(loadData("pk_scans", []));
+    async function load() {
+      try {
+        const pRes = await listPatients({ pageSize: 1000 });
+        setPatients(pRes.patients || []);
+        const sRes = await listScanHistory(null, { pageSize: 1000 });
+        setScans(sRes || []);
+      } catch (err) {
+        console.error("Failed to load from Supabase:", err);
+      }
+    }
+    load();
     // Collapse sidebar on small screens
     const mq = window.matchMedia("(max-width: 768px)");
     if (mq.matches) setSidebarOpen(false);
@@ -30,31 +35,37 @@ export default function App() {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  const updatePatients = (p) => { setPatients(p); saveData("pk_patients", p); };
-  const updateScans = (s) => { setScans(s); saveData("pk_scans", s); };
-
-  const addPatient = (p) => {
-    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const mrn = "PKS-" + id.toUpperCase().slice(0, 8);
-    const newP = { id, mrn, ...p, status: "active", createdAt: new Date().toISOString() };
-    updatePatients([newP, ...patients]);
-    return newP;
+  const addPatient = async (p) => {
+    try {
+      const newP = await dbCreatePatient(p);
+      setPatients(prev => [newP, ...prev]);
+      return newP;
+    } catch (e) { console.error("addPatient error:", e); }
   };
 
-  const editPatient = (id, updates) => {
-    updatePatients(patients.map(p => p.id === id ? { ...p, ...updates } : p));
-    if (selectedPatient?.id === id) setSelectedPatient(prev => ({ ...prev, ...updates }));
+  const editPatient = async (id, updates) => {
+    try {
+      await dbUpdatePatient(id, updates);
+      setPatients(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+      if (selectedPatient?.id === id) setSelectedPatient(prev => ({ ...prev, ...updates }));
+    } catch (e) { console.error("editPatient error:", e); }
   };
 
-  const deletePatient = (id) => {
-    updatePatients(patients.filter(p => p.id !== id));
-    updateScans(scans.filter(s => s.patientId !== id));
-    if (selectedPatient?.id === id) { setSelectedPatient(null); setTab("patients"); }
+  const deletePatient = async (id) => {
+    try {
+      await dbDeletePatient(id);
+      setPatients(prev => prev.filter(p => p.id !== id));
+      setScans(prev => prev.filter(s => s.patientId !== id));
+      if (selectedPatient?.id === id) { setSelectedPatient(null); setTab("patients"); }
+    } catch (e) { console.error("deletePatient error:", e); }
   };
 
-  const addScan = (scan) => {
-    const newScan = { id: Date.now().toString(), ...scan, createdAt: new Date().toISOString() };
-    updateScans([newScan, ...scans]);
+  const addScan = async (scan) => {
+    try {
+      const { patientId, ...scanData } = scan;
+      const newScan = await dbAddScanResult(patientId, scanData);
+      setScans(prev => [newScan, ...prev]);
+    } catch (e) { console.error("addScan error:", e); }
   };
 
   const goToScan = (patient) => { setSelectedPatient(patient); setTab("scan"); };
