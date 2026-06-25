@@ -5,6 +5,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --production=false
 
 # Only copy the active files — skip old dead directories
+# Cache-bust: change this value to force a fresh build
+ARG CACHEBUST=7
 COPY app/globals.css app/layout.js app/page.js app/favicon.ico ./app/
 COPY app/ui/ ./app/ui/
 COPY app/lib/ ./app/lib/

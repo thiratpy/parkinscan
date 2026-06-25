@@ -6,8 +6,16 @@ export async function getSupabase() {
   if (supabaseInstance) return supabaseInstance;
 
   try {
-    const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port === '3000';
-    const apiUrl = isLocal ? "http://localhost:8000/api/config" : "/api/config";
+    // In production (HF Space), frontend + API are on the same origin → relative path works.
+    // In local dev, Next.js runs on :3000/:3001 but the Python API is on :8000.
+    let apiUrl = "/api/config";
+    if (typeof window !== "undefined") {
+      const port = window.location.port;
+      const host = window.location.hostname;
+      if (host === "localhost" && (port === "3000" || port === "3001")) {
+        apiUrl = "http://localhost:8000/api/config";
+      }
+    }
     const res = await fetch(apiUrl);
     
     if (!res.ok) throw new Error(`API returned status ${res.status}`);
