@@ -143,14 +143,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ── API Endpoints ────────────────────────────────────────
 @app.get("/health")
@@ -543,42 +541,6 @@ async def dashboard_stats():
     except Exception as e:
         logger.error(f"dashboard_stats error: {e}")
         return {"totalPatients": 0, "totalScans": 0, "scansThisWeek": 0, "avgConfidence": 0}
-
-
-# ── Serve Frontend (production only) ─────────────────────
-# When deployed, the Next.js static export lives in /app/static
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-
-if os.path.isdir(STATIC_DIR):
-    # Serve Next.js _next assets
-    app.mount("/_next", StaticFiles(directory=os.path.join(STATIC_DIR, "_next")), name="next_assets")
-
-    # Serve other static files (favicon, etc.)
-    @app.get("/favicon.ico")
-    async def favicon():
-        fav = os.path.join(STATIC_DIR, "favicon.ico")
-        if os.path.isfile(fav):
-            return FileResponse(fav)
-        raise HTTPException(404)
-
-    # SPA fallback — serve index.html for all non-API routes
-    @app.get("/{path:path}")
-    async def serve_spa(path: str):
-        # Try exact file first (e.g., file.js, image.png)
-        file_path = os.path.join(STATIC_DIR, path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        # Otherwise serve index.html (SPA) with NO CACHE headers
-        return FileResponse(
-            os.path.join(STATIC_DIR, "index.html"),
-            headers={
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            }
-        )
-else:
-    logger.info("No static directory found — running in API-only mode (local dev)")
 
 
 if __name__ == "__main__":

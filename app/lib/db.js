@@ -2,6 +2,11 @@
 // No Supabase JS client, no env vars, no localStorage. Pure fetch().
 
 function getApiBase() {
+  // Always use the environment variable if available (e.g. on Vercel pointing to HF)
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
   if (typeof window !== "undefined") {
     const port = window.location.port;
     const host = window.location.hostname;
@@ -10,7 +15,7 @@ function getApiBase() {
       return "http://localhost:8000";
     }
   }
-  // Production (HF Space): same origin
+  // Fallback for same origin (if still deployed together)
   return "";
 }
 
