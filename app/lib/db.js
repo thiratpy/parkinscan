@@ -14,19 +14,31 @@ function generateMRN() {
 function mapRow(row) {
   if (!row) return null;
   const mapped = { ...row };
-  if (row.created_at) {
-    mapped.createdAt = { toDate: () => new Date(row.created_at) };
-  }
-  if (row.updated_at) {
-    mapped.updatedAt = { toDate: () => new Date(row.updated_at) };
-  }
+  if (row.created_at) mapped.createdAt = { toDate: () => new Date(row.created_at) };
+  if (row.updated_at) mapped.updatedAt = { toDate: () => new Date(row.updated_at) };
+  
+  // Map snake_case from DB back to camelCase for frontend
+  if (row.date_of_birth !== undefined) mapped.dateOfBirth = row.date_of_birth;
+  if (row.diagnosis_status !== undefined) mapped.diagnosisStatus = row.diagnosis_status;
+  if (row.treating_physician !== undefined) mapped.treatingPhysician = row.treating_physician;
+  
   return mapped;
 }
 
 export async function createPatient(data) {
   const supabase = await getSupabase();
   const patientData = {
-    ...data,
+    name: data.name,
+    hn: data.hn,
+    age: data.age ? Number(data.age) : null,
+    sex: data.sex,
+    date_of_birth: data.dateOfBirth,
+    diagnosis_status: data.diagnosisStatus,
+    medications: data.medications,
+    treating_physician: data.treatingPhysician,
+    phone: data.phone,
+    email: data.email,
+    notes: data.notes,
     mrn: generateMRN(),
     status: "active",
   };
@@ -37,7 +49,10 @@ export async function createPatient(data) {
     .select()
     .single();
     
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase createPatient Error:", error);
+    throw new Error(error.message || JSON.stringify(error));
+  }
   return mapRow(newPatient);
 }
 
@@ -106,13 +121,28 @@ export async function listPatients({ search = "", status = "all", sortBy = "crea
 
 export async function addScanResult(patientId, scanData) {
   const supabase = await getSupabase();
+  const scanRow = {
+    patient_id: patientId,
+    type: scanData.type || "mri",
+    prediction: scanData.prediction,
+    confidence: scanData.confidence ? Number(scanData.confidence) : null,
+    doctor_override: scanData.doctorOverride || null,
+    label: scanData.label || null,
+    is_mock: scanData.mock || false,
+    notes: scanData.notes || null,
+    image_url: scanData.imageUrl || null,
+  };
+
   const { data, error } = await supabase
     .from(SCANS_COLLECTION)
-    .insert([{ patientId: patientId, ...scanData }])
+    .insert([scanRow])
     .select()
     .single();
     
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase addScanResult Error:", error);
+    throw new Error(error.message || JSON.stringify(error));
+  }
   return mapRow(data);
 }
 
@@ -125,12 +155,23 @@ export async function listScanHistory(patientId = null, { pageSize = 50 } = {}) 
     .limit(pageSize);
     
   if (patientId) {
-    query = query.eq('patientId', patientId);
+    query = query.eq('patient_id', patientId);
   }
   
   const { data, error } = await query;
-  if (error) throw error;
-  return (data || []).map(mapRow);
+  if (error) {
+    console.error("Supabase listScanHistory Error:", error);
+    throw new Error(error.message || JSON.stringify(error));
+  }
+  return (data || []).map((row) => {
+    const mapped = mapRow(row);
+    // map scan-specific fields back to frontend camelCase
+    mapped.patientId = row.patient_id;
+    mapped.doctorOverride = row.doctor_override;
+    mapped.imageUrl = row.image_url;
+    mapped.mock = row.is_mock;
+    return mapped;
+  });
 }
 
 export async function getScanResult(id) {
@@ -142,7 +183,12 @@ export async function getScanResult(id) {
     .single();
     
   if (error) return null;
-  return mapRow(data);
+  const mapped = mapRow(data);
+  mapped.patientId = data.patient_id;
+  mapped.doctorOverride = data.doctor_override;
+  mapped.imageUrl = data.image_url;
+  mapped.mock = data.is_mock;
+  return mapped;
 }
 
 // ── Stats ──────────────────────────────────────────────
